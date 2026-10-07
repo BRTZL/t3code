@@ -343,7 +343,7 @@ export function UsagePage() {
           <h1>Usage</h1>
         </WorkspaceBreadcrumbItem>
         <WorkspaceBreadcrumbSeparator />
-        <WorkspaceBreadcrumbItem className="min-w-10">
+        <WorkspaceBreadcrumbItem className="min-w-10 shrink">
           <UsageEnvironmentFilter
             environments={environments}
             selectedEnvironments={selectedEnvironments}
