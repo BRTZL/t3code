@@ -30,7 +30,7 @@ index cc32d28..3a46bf4 100644
     * Returns the editor while this item is being edited. Partial diffs get an
     * editor after their files load; scrolling away or collapsing keeps it.
 diff --git a/dist/components/CodeView.js b/dist/components/CodeView.js
-index 140f94f..49b9f54 100644
+index 140f94f..97da3f2 100644
 --- a/dist/components/CodeView.js
 +++ b/dist/components/CodeView.js
 @@ -16,6 +16,7 @@ import { prefersReducedMotion } from "../utils/prefersReducedMotion.js";
@@ -67,7 +67,15 @@ index 140f94f..49b9f54 100644
  		this.resizeObserver.observe(this.root);
  		this.render(true);
  		window.__INSTANCE = this;
-@@ -485,6 +491,8 @@ var CodeView = class CodeView {
+@@ -464,6 +470,7 @@ var CodeView = class CodeView {
+ 		this.heightDirty = true;
+ 		this.resetRenderState();
+ 		if (!this.isContainerManaged) this.flushSlotCoordinator();
++		this.search.refresh();
+ 		if (failed) throw failure;
+ 	}
+ 	cleanUp() {
+@@ -485,6 +492,8 @@ var CodeView = class CodeView {
  		this.root?.removeEventListener("touchstart", this.clearPendingScroll);
  		this.root?.removeEventListener("pointerdown", this.clearPendingScroll);
  		this.root?.removeEventListener("keydown", this.clearPendingScroll);
@@ -76,7 +84,7 @@ index 140f94f..49b9f54 100644
  		this.root?.style.removeProperty("overflow-anchor");
  		this.container?.remove();
  		this.stickyOffset.remove();
-@@ -626,6 +634,123 @@ var CodeView = class CodeView {
+@@ -626,6 +635,123 @@ var CodeView = class CodeView {
  	getItem(itemId) {
  		return this.idToItem.get(itemId)?.item;
  	}
@@ -200,7 +208,7 @@ index 140f94f..49b9f54 100644
  	/**
  	* Returns the editor while this item is being edited. Partial diffs get an
  	* editor after their files load; scrolling away or collapsing keeps it.
-@@ -645,6 +770,7 @@ var CodeView = class CodeView {
+@@ -645,6 +771,7 @@ var CodeView = class CodeView {
  		this.render();
  		this.syncItemEditors();
  		this.syncSelection();
@@ -208,7 +216,7 @@ index 140f94f..49b9f54 100644
  		return true;
  	}
  	updateItemId(oldId, newId) {
-@@ -678,6 +804,7 @@ var CodeView = class CodeView {
+@@ -678,6 +805,7 @@ var CodeView = class CodeView {
  		this.renamePendingScrollTarget(oldId, newId);
  		this.renamePendingLayoutAnchor(oldId, newId);
  		this.render();
@@ -216,7 +224,7 @@ index 140f94f..49b9f54 100644
  		return true;
  	}
  	addItem(input) {
-@@ -687,6 +814,7 @@ var CodeView = class CodeView {
+@@ -687,6 +815,7 @@ var CodeView = class CodeView {
  		this.appendItemsInternal(inputs);
  		this.syncItemEditors();
  		this.syncSelection();
@@ -224,7 +232,7 @@ index 140f94f..49b9f54 100644
  	}
  	removeItem(itemId) {
  		const item = this.idToItem.get(itemId);
-@@ -709,6 +837,7 @@ var CodeView = class CodeView {
+@@ -709,6 +838,7 @@ var CodeView = class CodeView {
  			for (const removedItem of removedItemsById?.values() ?? []) removedItem.instance.cleanUp();
  		}
  		this.syncSelection();
@@ -232,7 +240,7 @@ index 140f94f..49b9f54 100644
  	}
  	/**
  	* Append new records to the viewer while preserving existing layout state.
-@@ -1330,6 +1459,10 @@ var CodeView = class CodeView {
+@@ -1330,6 +1460,10 @@ var CodeView = class CodeView {
  		item.item = nextItem;
  		item.version = nextItem.version;
  		item.renderedOptionsRevision = -1;
@@ -243,7 +251,7 @@ index 140f94f..49b9f54 100644
  		return true;
  	}
  	getMaxScrollTopForHeight(scrollHeight) {
-@@ -1710,6 +1843,10 @@ var CodeView = class CodeView {
+@@ -1710,6 +1844,10 @@ var CodeView = class CodeView {
  		this.updateStickyPositioning();
  		this.validateStickyContainerHeight();
  		this.fixContainerFocus();
@@ -254,7 +262,7 @@ index 140f94f..49b9f54 100644
  		if (fitPerfectly || this.scrollAnimation != null) this.render();
  	};
  	flushManagers(updatedItems) {
-@@ -1804,7 +1941,8 @@ var CodeView = class CodeView {
+@@ -1804,7 +1942,8 @@ var CodeView = class CodeView {
  		this.notifyScroll();
  		this.render();
  	};
@@ -264,7 +272,7 @@ index 140f94f..49b9f54 100644
  		this.pendingScrollTarget = void 0;
  		this.pendingLayoutAnchor = void 0;
  		this.scrollAnimation = void 0;
-@@ -2066,7 +2204,12 @@ var CodeView = class CodeView {
+@@ -2066,7 +2205,12 @@ var CodeView = class CodeView {
  			const item = this.items[index];
  			if (item == null) throw new Error("CodeView.recomputeLayout: invalid item index");
  			item.top = runningTop;
@@ -278,7 +286,7 @@ index 140f94f..49b9f54 100644
  			else item.height = item.instance.updateCodeViewLayout(item.item.file, runningTop, reset, item.item.annotations ?? []);
  			runningTop += item.height;
  			if (index < this.items.length - 1) runningTop += layout.gap;
-@@ -2086,6 +2229,27 @@ var CodeView = class CodeView {
+@@ -2086,6 +2230,27 @@ var CodeView = class CodeView {
  		return this.getLayout().gap + this.itemMetricsCache.diffHeaderHeight;
  	}
  };
@@ -308,10 +316,10 @@ index 140f94f..49b9f54 100644
  	if (item.type === "diff") return item.instance.updateCodeViewLayout(item.item.fileDiff, item.top, void 0, item.item.annotations ?? []);
 diff --git a/dist/components/CodeViewSearch.js b/dist/components/CodeViewSearch.js
 new file mode 100644
-index 0000000..8c4c187
+index 0000000..7d80244
 --- /dev/null
 +++ b/dist/components/CodeViewSearch.js
-@@ -0,0 +1,355 @@
+@@ -0,0 +1,362 @@
 +import { isPrimaryModifier } from "../editor/platform.js";
 +import { resolveFindAgainShortcut } from "../editor/command.js";
 +import { SearchPanelWidget } from "../editor/searchPanel.js";
@@ -388,16 +396,22 @@ index 0000000..8c4c187
 +		root.prepend(host);
 +		this.#host = host;
 +		const defaultQuery = getSelectionQuery();
-+		this.#widget = new SearchPanelWidget({
-+			textDocument: { search: (params) => this.#search(params) },
++		// The widget runs its first search a frame after opening, so callbacks from a
++		// panel that has since closed must not touch the current search.
++		const isLive = () => this.#widget === widget;
++		const widget = new SearchPanelWidget({
++			textDocument: { search: (params) => isLive() ? this.#search(params) : [] },
 +			containerElement: anchor,
 +			defaultQuery,
 +			mode: "find",
 +			allowReplace: false,
 +			initialMatch: defaultQuery !== "" ? [0, 0] : void 0,
-+			scrollToMatch: ([offset]) => this.#goTo(offset),
++			scrollToMatch: ([offset]) => {
++				if (isLive()) this.#goTo(offset);
++			},
 +			applyReplace: () => {},
 +			onUpdate: (matches, options) => {
++				if (!isLive()) return;
 +				if (matches.length === 0) {
 +					this.#setEntries([]);
 +					return;
@@ -412,7 +426,8 @@ index 0000000..8c4c187
 +			},
 +			onClose: () => this.#teardown(true)
 +		});
-+		this.#widget.focus();
++		this.#widget = widget;
++		widget.focus();
 +	}
 +	close() {
 +		this.#widget?.close();
