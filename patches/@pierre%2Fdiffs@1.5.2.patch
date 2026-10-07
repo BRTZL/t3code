@@ -30,7 +30,7 @@ index cc32d28..3a46bf4 100644
     * Returns the editor while this item is being edited. Partial diffs get an
     * editor after their files load; scrolling away or collapsing keeps it.
 diff --git a/dist/components/CodeView.js b/dist/components/CodeView.js
-index 140f94f..ed743c8 100644
+index 140f94f..0cc8618 100644
 --- a/dist/components/CodeView.js
 +++ b/dist/components/CodeView.js
 @@ -16,6 +16,7 @@ import { prefersReducedMotion } from "../utils/prefersReducedMotion.js";
@@ -76,7 +76,7 @@ index 140f94f..ed743c8 100644
  		this.root?.style.removeProperty("overflow-anchor");
  		this.container?.remove();
  		this.stickyOffset.remove();
-@@ -626,6 +634,88 @@ var CodeView = class CodeView {
+@@ -626,6 +634,120 @@ var CodeView = class CodeView {
  	getItem(itemId) {
  		return this.idToItem.get(itemId)?.item;
  	}
@@ -114,7 +114,6 @@ index 140f94f..ed743c8 100644
 +			this.options.onRevealSearchMatch(item.item);
 +			return;
 +		}
-+		this.pendingSearchReveal = void 0;
 +		const target = {
 +			type: "line",
 +			id: match.id,
@@ -122,9 +121,42 @@ index 140f94f..ed743c8 100644
 +			side: match.side,
 +			align: "center"
 +		};
-+		if (match.side === "additions" && !item.instance.isLineRenderable(match.lineNumber)) item.instance.revealLine(match.lineNumber);
-+		else if (!afterUnfold && this.isScrollTargetInView(target)) return;
++		// Before its first render a file reports every line renderable, so collapsed
++		// context can't be expanded yet: scroll there and finish once it has rendered.
++		const rendered = item.instance.getRenderedDiff() != null;
++		this.pendingSearchReveal = rendered ? void 0 : match;
++		if (rendered && match.side === "additions" && !item.instance.isLineRenderable(match.lineNumber)) item.instance.revealLine(match.lineNumber);
++		else if (rendered && !afterUnfold && this.isScrollTargetInView(target)) return;
 +		this.scrollTo(target);
++	}
++	/** Finish a reveal that was waiting for its file to render for the first time. */
++	resumePendingSearchReveal(updatedItems) {
++		const reveal = this.pendingSearchReveal;
++		if (reveal == null) return;
++		for (const item of updatedItems) if (item.item.id === reveal.id && item.item.collapsed !== true && item.instance.getRenderedDiff() != null) {
++			queueMicrotask(() => {
++				if (this.pendingSearchReveal === reveal) this.revealSearchMatch(reveal, true);
++			});
++			return;
++		}
++	}
++	/** Scroll a wide code column so the current match is visible when lines don't wrap. */
++	revealSearchMatchHorizontally(match, element) {
++		const item = this.idToItem.get(match.id);
++		const code = element.closest("[data-code]");
++		if (item == null || code == null || code.scrollWidth <= code.clientWidth) return;
++		const codeRect = code.getBoundingClientRect();
++		const matchRect = getTextRangeRect(element, match.start, match.end);
++		if (matchRect == null) return;
++		// The line-number gutter is sticky at the left edge and covers the code under it.
++		const gutterRight = code.querySelector(":scope > [data-gutter]")?.getBoundingClientRect().right;
++		const visibleLeft = gutterRight != null && gutterRight > codeRect.left ? gutterRight : codeRect.left;
++		const padding = 24;
++		let next = code.scrollLeft;
++		if (matchRect.left < visibleLeft + padding) next -= visibleLeft + padding - matchRect.left;
++		else if (matchRect.right > codeRect.right - padding) next += matchRect.right - (codeRect.right - padding);
++		else return;
++		item.instance.setCodeScrollLeft(Math.max(0, next));
 +	}
 +	/** Whether a line already sits fully below the sticky header and find panel. */
 +	isScrollTargetInView(target) {
@@ -165,7 +197,7 @@ index 140f94f..ed743c8 100644
  	/**
  	* Returns the editor while this item is being edited. Partial diffs get an
  	* editor after their files load; scrolling away or collapsing keeps it.
-@@ -645,6 +735,7 @@ var CodeView = class CodeView {
+@@ -645,6 +767,7 @@ var CodeView = class CodeView {
  		this.render();
  		this.syncItemEditors();
  		this.syncSelection();
@@ -173,7 +205,7 @@ index 140f94f..ed743c8 100644
  		return true;
  	}
  	updateItemId(oldId, newId) {
-@@ -678,6 +769,7 @@ var CodeView = class CodeView {
+@@ -678,6 +801,7 @@ var CodeView = class CodeView {
  		this.renamePendingScrollTarget(oldId, newId);
  		this.renamePendingLayoutAnchor(oldId, newId);
  		this.render();
@@ -181,7 +213,7 @@ index 140f94f..ed743c8 100644
  		return true;
  	}
  	addItem(input) {
-@@ -687,6 +779,7 @@ var CodeView = class CodeView {
+@@ -687,6 +811,7 @@ var CodeView = class CodeView {
  		this.appendItemsInternal(inputs);
  		this.syncItemEditors();
  		this.syncSelection();
@@ -189,7 +221,7 @@ index 140f94f..ed743c8 100644
  	}
  	removeItem(itemId) {
  		const item = this.idToItem.get(itemId);
-@@ -709,6 +802,7 @@ var CodeView = class CodeView {
+@@ -709,6 +834,7 @@ var CodeView = class CodeView {
  			for (const removedItem of removedItemsById?.values() ?? []) removedItem.instance.cleanUp();
  		}
  		this.syncSelection();
@@ -197,7 +229,7 @@ index 140f94f..ed743c8 100644
  	}
  	/**
  	* Append new records to the viewer while preserving existing layout state.
-@@ -1330,6 +1424,10 @@ var CodeView = class CodeView {
+@@ -1330,6 +1456,10 @@ var CodeView = class CodeView {
  		item.item = nextItem;
  		item.version = nextItem.version;
  		item.renderedOptionsRevision = -1;
@@ -208,15 +240,18 @@ index 140f94f..ed743c8 100644
  		return true;
  	}
  	getMaxScrollTopForHeight(scrollHeight) {
-@@ -1710,6 +1808,7 @@ var CodeView = class CodeView {
+@@ -1710,6 +1840,10 @@ var CodeView = class CodeView {
  		this.updateStickyPositioning();
  		this.validateStickyContainerHeight();
  		this.fixContainerFocus();
-+		if (updatedItems.size > 0) this.search.repaint();
++		if (updatedItems.size > 0) {
++			this.resumePendingSearchReveal(updatedItems);
++			this.search.repaint();
++		}
  		if (fitPerfectly || this.scrollAnimation != null) this.render();
  	};
  	flushManagers(updatedItems) {
-@@ -1804,7 +1903,8 @@ var CodeView = class CodeView {
+@@ -1804,7 +1938,8 @@ var CodeView = class CodeView {
  		this.notifyScroll();
  		this.render();
  	};
@@ -226,7 +261,7 @@ index 140f94f..ed743c8 100644
  		this.pendingScrollTarget = void 0;
  		this.pendingLayoutAnchor = void 0;
  		this.scrollAnimation = void 0;
-@@ -2066,7 +2166,12 @@ var CodeView = class CodeView {
+@@ -2066,7 +2201,12 @@ var CodeView = class CodeView {
  			const item = this.items[index];
  			if (item == null) throw new Error("CodeView.recomputeLayout: invalid item index");
  			item.top = runningTop;
@@ -240,12 +275,40 @@ index 140f94f..ed743c8 100644
  			else item.height = item.instance.updateCodeViewLayout(item.item.file, runningTop, reset, item.item.annotations ?? []);
  			runningTop += item.height;
  			if (index < this.items.length - 1) runningTop += layout.gap;
+@@ -2086,6 +2226,27 @@ var CodeView = class CodeView {
+ 		return this.getLayout().gap + this.itemMetricsCache.diffHeaderHeight;
+ 	}
+ };
++function getTextRangeRect(lineElement, start, end) {
++	const walker = document.createTreeWalker(lineElement, NodeFilter.SHOW_TEXT);
++	let consumed = 0;
++	let startNode;
++	let startOffset = 0;
++	let node;
++	while ((node = walker.nextNode()) != null) {
++		const length = node.data.length;
++		if (startNode == null && start < consumed + length) {
++			startNode = node;
++			startOffset = start - consumed;
++		}
++		if (startNode != null && end <= consumed + length) {
++			const range = document.createRange();
++			range.setStart(startNode, startOffset);
++			range.setEnd(node, end - consumed);
++			return range.getBoundingClientRect();
++		}
++		consumed += length;
++	}
++}
+ function prepareItemInstance(item) {
+ 	item.instance.cleanUp(true);
+ 	if (item.type === "diff") return item.instance.updateCodeViewLayout(item.item.fileDiff, item.top, void 0, item.item.annotations ?? []);
 diff --git a/dist/components/CodeViewSearch.js b/dist/components/CodeViewSearch.js
 new file mode 100644
-index 0000000..fff796c
+index 0000000..d46e431
 --- /dev/null
 +++ b/dist/components/CodeViewSearch.js
-@@ -0,0 +1,344 @@
+@@ -0,0 +1,352 @@
 +import { isPrimaryModifier } from "../editor/platform.js";
 +import { resolveFindAgainShortcut } from "../editor/command.js";
 +import { SearchPanelWidget } from "../editor/searchPanel.js";
@@ -292,6 +355,7 @@ index 0000000..fff796c
 +	#entries = [];
 +	#entriesByItem = /* @__PURE__ */ new Map();
 +	#current;
++	#revealHorizontally;
 +	#ranges = [];
 +	#searchedDiffs = [];
 +	constructor(view) {
@@ -434,6 +498,7 @@ index 0000000..fff796c
 +		const index = this.#entries.findIndex((entry) => entry.range[0] === offset);
 +		if (index === -1) return;
 +		this.#current = index;
++		this.#revealHorizontally = this.#entries[index];
 +		this.#view.revealSearchMatch(this.#entries[index]);
 +		this.#paint();
 +	}
@@ -446,11 +511,17 @@ index 0000000..fff796c
 +		}
 +		this.#ranges = [];
 +		const current = this.#current != null ? this.#entries[this.#current] : void 0;
++		let currentElement;
 +		for (const { entry, element } of this.#view.getMountedSearchMatches(this.#entriesByItem)) {
 +			const range = createTextRange(element, entry.start, entry.end);
 +			if (range == null) continue;
 +			(entry === current ? highlights.focus : highlights.match).add(range);
 +			this.#ranges.push(range);
++			if (entry === current) currentElement ??= element;
++		}
++		if (current != null && currentElement != null && this.#revealHorizontally === current) {
++			this.#revealHorizontally = void 0;
++			this.#view.revealSearchMatchHorizontally(current, currentElement);
 +		}
 +	}
 +};
