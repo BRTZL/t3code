@@ -10,11 +10,12 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as MobileDatabase from "../persistence/mobile-database";
-import { decodeStoredShellSnapshot, encodeStoredShellSnapshot } from "./shell-cache-encoding";
+import { encodeStoredShellSnapshot } from "./shell-cache-encoding";
 import {
   attachProjectFaviconDatabase,
   projectFaviconDatabaseCache,
 } from "../lib/projectFaviconDatabaseCache";
+import { decodeStoredShellSnapshot } from "./shell-cache-decoding";
 
 const SERVER_CONFIG_CACHE_SCHEMA_VERSION = 1;
 const VCS_REFS_CACHE_SCHEMA_VERSION = 1;

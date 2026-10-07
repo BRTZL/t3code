@@ -256,7 +256,7 @@ describe("mobile SQLite environment cache store", () => {
     }),
   );
 
-  it.effect("returns cached threads before their pull request links, which load after", () =>
+  it.live("returns cached threads before their pull request links, which load after", () =>
     Effect.gen(function* () {
       const memory = makeDatabase();
       const store = yield* make().pipe(
@@ -286,7 +286,7 @@ describe("mobile SQLite environment cache store", () => {
     }),
   );
 
-  it.effect("keeps cached threads when their pull request links cannot be read", () => {
+  it.live("keeps cached threads when their pull request links cannot be read", () => {
     const messages: Array<unknown> = [];
     const logger = Logger.make(({ message }) => {
       messages.push(message);

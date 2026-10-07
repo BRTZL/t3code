@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -25,7 +26,13 @@ import { runCachePersistence } from "./cachePersistence.ts";
 import { subscribeDynamic } from "../rpc/client.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import * as ShellSnapshotLoader from "./shellSnapshotHttp.ts";
-import { applyShellStreamEvent, mergeShellSnapshotProjects } from "./shellReducer.ts";
+import type { DeferredShellSnapshot } from "./shellPullRequests.ts";
+import {
+  applyShellStreamEvent,
+  mergeShellSnapshotProjects,
+  reuseUnchangedThreadShells,
+  sameThreadPullRequests,
+} from "./shellReducer.ts";
 import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connections.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
 
@@ -49,6 +56,12 @@ function shellStatusForSnapshot(
   return Option.isSome(snapshot) ? "cached" : "empty";
 }
 
+function withoutDeferredPullRequests(value: DeferredShellSnapshot): OrchestrationV2ShellSnapshot {
+  if (value.loadPullRequests === undefined) return value;
+  const { loadPullRequests: _deferred, ...snapshot } = value;
+  return snapshot;
+}
+
 const SHELL_SYNCHRONIZATION_ERROR_MESSAGE = "Could not synchronize environment data.";
 
 export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")(function* () {
@@ -64,14 +77,11 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           environmentId,
           ...safeErrorLogAttributes(error),
         }),
-        Effect.as(Option.none<Persistence.CachedShellSnapshot>()),
+        Effect.as(Option.none<DeferredShellSnapshot>()),
       ),
     ),
   );
-  const cachedSnapshot = Option.map(cached, (value): OrchestrationV2ShellSnapshot => {
-    const { loadPullRequests, ...snapshot } = value;
-    return loadPullRequests === undefined ? value : snapshot;
-  });
+  const cachedSnapshot = Option.map(cached, withoutDeferredPullRequests);
   const state = yield* SubscriptionRef.make<EnvironmentShellState>({
     snapshot: cachedSnapshot,
     status: shellStatusForSnapshot(cachedSnapshot),
@@ -220,35 +230,62 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     }
   });
 
-  // The cached rows are already visible; their pull request links fill in once decoded.
-  // Only rows still holding the cached object take links, because a row the server has sent
-  // since carries its own. A new session's full snapshot replaces every cached row before
-  // anything is persisted, so a row still waiting for its links is never saved.
-  const deferredPullRequests = Option.flatMap(cached, (value) =>
-    Option.fromUndefinedOr(value.loadPullRequests),
-  );
-  if (Option.isSome(deferredPullRequests) && Option.isSome(cachedSnapshot)) {
-    const cachedThreads = new Set(cachedSnapshot.value.threads);
-    yield* deferredPullRequests.value.pipe(
+  // Rows can arrive before their pull request links (see DeferredShellSnapshot), so the list
+  // paints first. The links then fill into the rows that still hold the object they arrived
+  // with; a row the server has replaced since carries its own links.
+  // Captured so fills started from the subscription callback still end with this state.
+  const stateScope = yield* Effect.scope;
+  const fillDeferredPullRequests = (
+    source: DeferredShellSnapshot,
+    applied: OrchestrationV2ShellSnapshot,
+    persist: boolean,
+  ) => {
+    if (source.loadPullRequests === undefined) return Effect.succeed(undefined);
+    const arrivedRows = new Set(applied.threads);
+    const arrivedIds = new Set(source.threads.map((thread) => thread.id));
+    return source.loadPullRequests.pipe(
       Effect.flatMap((linksByThreadId) =>
-        SubscriptionRef.updateSome(state, (current) =>
-          Option.flatMap(current.snapshot, (snapshot) => {
+        SubscriptionRef.modify(
+          state,
+          (current): [Option.Option<OrchestrationV2ShellSnapshot>, EnvironmentShellState] => {
+            if (Option.isNone(current.snapshot)) return [Option.none(), current];
+            const snapshot = current.snapshot.value;
             let changed = false;
             const threads = snapshot.threads.map((thread) => {
+              if (!arrivedRows.has(thread) || !arrivedIds.has(thread.id)) return thread;
               const links = linksByThreadId.get(thread.id);
-              if (links === undefined || !cachedThreads.has(thread)) return thread;
+              // A reused row may already hold these links from an earlier fill.
+              if (sameThreadPullRequests(thread.pullRequests, links)) return thread;
               changed = true;
+              if (links === undefined) {
+                const { pullRequests: _previous, ...row } = thread;
+                return row;
+              }
               return { ...thread, pullRequests: links };
             });
-            return changed
-              ? Option.some({ ...current, snapshot: Option.some({ ...snapshot, threads }) })
-              : Option.none();
-          }),
+            if (!changed) return [Option.none(), current];
+            const next = { ...snapshot, threads };
+            return [Option.some(next), { ...current, snapshot: Option.some(next) }];
+          },
         ),
       ),
-      Effect.forkScoped,
+      // A live snapshot is saved again with its links, so the cache never keeps a copy
+      // without them. Cached rows are not saved; the server snapshot replaces them first.
+      Effect.flatMap((filled) =>
+        persist && Option.isSome(filled)
+          ? Ref.set(latestLiveSnapshot, filled).pipe(
+              Effect.andThen(Queue.offer(persistence, filled.value)),
+            )
+          : Effect.void,
+      ),
+      Effect.forkIn(stateScope),
     );
-  }
+  };
+  // The server's snapshot carries its own links, so a cached fill still running then stops.
+  const cachedFill =
+    Option.isSome(cached) && Option.isSome(cachedSnapshot)
+      ? yield* fillDeferredPullRequests(cached.value, cachedSnapshot.value, false)
+      : undefined;
 
   const foregroundResubscriptions = Option.match(wakeups, {
     onNone: () => Stream.never,
@@ -292,9 +329,18 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           );
           const httpSnapshot = yield* snapshotLoader.load(prepared);
           if (Option.isSome(httpSnapshot)) {
-            yield* applyItems([{ kind: "snapshot", snapshot: httpSnapshot.value }]);
+            if (cachedFill !== undefined) yield* Fiber.interrupt(cachedFill);
+            const previous = yield* SubscriptionRef.get(state);
+            const snapshot = reuseUnchangedThreadShells(
+              Option.getOrNull(previous.snapshot),
+              withoutDeferredPullRequests(httpSnapshot.value),
+            );
+            yield* applyItems([{ kind: "snapshot", snapshot }]);
             canResume = true;
             current = yield* SubscriptionRef.get(state);
+            if (Option.isSome(current.snapshot)) {
+              yield* fillDeferredPullRequests(httpSnapshot.value, current.snapshot.value, true);
+            }
           }
         }
 
@@ -483,5 +529,6 @@ export function createEnvironmentShellAtoms<R, E>(
 export * from "./models.ts";
 export * from "./shellCommands.ts";
 export * from "./shellReducer.ts";
+export * from "./shellPullRequests.ts";
 export * as ShellSnapshotLoader from "./shellSnapshotHttp.ts";
 export * from "./snapshots.ts";

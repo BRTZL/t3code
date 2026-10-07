@@ -1052,4 +1052,87 @@ describe("environment shell synchronization", () => {
       expect(filled[1]?.pullRequests).toEqual([link(2)]);
     }),
   );
+
+  it.effect("shows HTTP rows before their pull request links and saves them once filled", () =>
+    Effect.gen(function* () {
+      const link: ThreadPullRequestLink = {
+        host: "github.com",
+        repository: "pingdotgg/t3code",
+        number: 7,
+        url: "https://github.com/pingdotgg/t3code/pull/7",
+        source: "agent",
+        linkedAt: "2026-06-20T00:00:00.000Z",
+        snapshot: null,
+        stack: null,
+      };
+      const httpSnapshot: OrchestrationV2ShellSnapshot = {
+        ...v2ShellSnapshot,
+        snapshotSequence: 3,
+      };
+      const linksReady = yield* Deferred.make<void>();
+      const saved = yield* Queue.unbounded<OrchestrationV2ShellSnapshot>();
+      const client = {
+        [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: () => Stream.never,
+      } as unknown as WsRpcProtocolClient;
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE),
+        session: yield* SubscriptionRef.make(Option.some(session(client))),
+        prepared: yield* SubscriptionRef.make(Option.some(PREPARED)),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+      const cache = Persistence.EnvironmentCacheStore.of({
+        loadShell: () => Effect.succeedNone,
+        saveShell: (_environmentId, snapshot) => Queue.offer(saved, snapshot),
+        loadThread: () => Effect.succeedNone,
+        saveThread: () => Effect.void,
+        removeThread: () => Effect.void,
+        loadServerConfig: () => Effect.succeedNone,
+        saveServerConfig: () => Effect.void,
+        loadVcsRefs: () => Effect.succeedNone,
+        saveVcsRefs: () => Effect.void,
+        removeVcsRefs: () => Effect.void,
+        clearVcsRefs: () => Effect.void,
+        clear: () => Effect.void,
+      });
+      const snapshotLoader = ShellSnapshotLoader.ShellSnapshotLoader.of({
+        load: () =>
+          Effect.succeedSome({
+            ...httpSnapshot,
+            loadPullRequests: Deferred.await(linksReady).pipe(
+              Effect.as(new Map([[v2ThreadShell.id, [link]]])),
+            ),
+          }),
+      });
+      const shellState = yield* makeEnvironmentShellState().pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+        Effect.provideService(ShellSnapshotLoader.ShellSnapshotLoader, snapshotLoader),
+      );
+
+      const rows = yield* SubscriptionRef.changes(shellState).pipe(
+        Stream.filter((state) => Option.isSome(state.snapshot)),
+        Stream.runHead,
+        Effect.map((state) => Option.getOrThrow(Option.getOrThrow(state).snapshot)),
+      );
+      expect(rows.threads[0]?.pullRequests).toBeUndefined();
+      expect(rows).not.toHaveProperty("loadPullRequests");
+
+      yield* Deferred.succeed(linksReady, undefined);
+      const filled = yield* SubscriptionRef.changes(shellState).pipe(
+        Stream.map((state) => Option.getOrThrow(state.snapshot).threads[0]),
+        Stream.filter((thread) => thread?.pullRequests !== undefined),
+        Stream.runHead,
+        Effect.map(Option.getOrThrow),
+      );
+      expect(filled?.pullRequests).toEqual([link]);
+
+      // The cache must end up with the links: the last save carries them.
+      yield* TestClock.adjust("30 seconds");
+      const saves = yield* Queue.takeAll(saved);
+      expect(saves.at(-1)?.threads[0]?.pullRequests).toEqual([link]);
+    }),
+  );
 });

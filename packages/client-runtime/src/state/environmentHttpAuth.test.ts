@@ -204,7 +204,11 @@ const LOADERS: ReadonlyArray<{
     path: "/api/orchestration/shell",
     response: SHELL,
     expected: SHELL,
-    load: fetchEnvironmentShellSnapshot,
+    // Pull request links decode separately; the rows match the response on their own.
+    load: (input: HttpInput) =>
+      fetchEnvironmentShellSnapshot(input).pipe(
+        Effect.map(({ loadPullRequests: _links, ...snapshot }) => snapshot),
+      ),
   },
   {
     name: "thread snapshot",
