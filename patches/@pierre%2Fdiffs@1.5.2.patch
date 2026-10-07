@@ -330,10 +330,10 @@ index 140f94f..96fc774 100644
  	if (item.type === "diff") return item.instance.updateCodeViewLayout(item.item.fileDiff, item.top, void 0, item.item.annotations ?? []);
 diff --git a/dist/components/CodeViewSearch.js b/dist/components/CodeViewSearch.js
 new file mode 100644
-index 0000000..2cc5c66
+index 0000000..63d9d12
 --- /dev/null
 +++ b/dist/components/CodeViewSearch.js
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,364 @@
 +import { isPrimaryModifier } from "../editor/platform.js";
 +import { resolveFindAgainShortcut } from "../editor/command.js";
 +import { SearchPanelWidget } from "../editor/searchPanel.js";
@@ -413,6 +413,9 @@ index 0000000..2cc5c66
 +		// The widget runs its first search a frame after opening, so callbacks from a
 +		// panel that has since closed must not touch the current search.
 +		const isLive = () => this.#widget === widget;
++		// Without a selection that first frame reports no matches; ignore it if a
++		// query typed before then has already found some.
++		let initializing = defaultQuery === "";
 +		const widget = new SearchPanelWidget({
 +			textDocument: { search: (params) => isLive() ? this.#search(params) : [] },
 +			containerElement: anchor,
@@ -427,7 +430,7 @@ index 0000000..2cc5c66
 +			onUpdate: (matches, options) => {
 +				if (!isLive()) return;
 +				if (matches.length === 0) {
-+					this.#setEntries([]);
++					if (!initializing || this.#entries.length === 0) this.#setEntries([]);
 +					return;
 +				}
 +				if (options?.syncSelection === false) {
@@ -441,6 +444,10 @@ index 0000000..2cc5c66
 +			onClose: () => this.#teardown(true)
 +		});
 +		this.#widget = widget;
++		// Runs after the widget's own first-frame callback, which was scheduled first.
++		if (initializing) requestAnimationFrame(() => {
++			initializing = false;
++		});
 +		widget.focus();
 +	}
 +	close() {
