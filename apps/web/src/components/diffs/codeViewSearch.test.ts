@@ -8,7 +8,14 @@ const { collectMatches } = (await import(/* @vite-ignore */ searchUrl.href)) as 
   collectMatches(
     items: ReadonlyArray<CodeViewItem<undefined>>,
     params: { text: string; caseSensitive: boolean; wholeWord: boolean; regex: boolean },
-  ): Array<{ id: string; side: string; lineNumber: number; start: number; end: number }>;
+  ): Array<{
+    id: string;
+    side: string;
+    isContext: boolean;
+    lineNumber: number;
+    start: number;
+    end: number;
+  }>;
 };
 
 const PATCH = `diff --git a/src/a.ts b/src/a.ts
@@ -69,6 +76,27 @@ describe("collectMatches", () => {
       "file-0:deletions:21:6-10",
     ]);
     expect(find("n[a-z]+e", { regex: true })).toHaveLength(6);
+  });
+
+  it("marks unchanged lines, which split view draws in both columns", () => {
+    const flags = collectMatches(items, {
+      text: "ctx",
+      caseSensitive: false,
+      wholeWord: false,
+      regex: false,
+    }).map(({ lineNumber, isContext }) => [lineNumber, isContext]);
+    expect(flags).toEqual([
+      [21, true],
+      [23, true],
+    ]);
+    expect(
+      collectMatches(items, {
+        text: "oldName",
+        caseSensitive: false,
+        wholeWord: false,
+        regex: false,
+      }).map(({ isContext }) => isContext),
+    ).toEqual([false, false]);
   });
 
   it("returns nothing for an empty query or an invalid pattern", () => {
