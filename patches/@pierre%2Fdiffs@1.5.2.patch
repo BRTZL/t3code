@@ -330,10 +330,10 @@ index 140f94f..96fc774 100644
  	if (item.type === "diff") return item.instance.updateCodeViewLayout(item.item.fileDiff, item.top, void 0, item.item.annotations ?? []);
 diff --git a/dist/components/CodeViewSearch.js b/dist/components/CodeViewSearch.js
 new file mode 100644
-index 0000000..63d9d12
+index 0000000..29370ad
 --- /dev/null
 +++ b/dist/components/CodeViewSearch.js
-@@ -0,0 +1,364 @@
+@@ -0,0 +1,360 @@
 +import { isPrimaryModifier } from "../editor/platform.js";
 +import { resolveFindAgainShortcut } from "../editor/command.js";
 +import { SearchPanelWidget } from "../editor/searchPanel.js";
@@ -476,13 +476,9 @@ index 0000000..63d9d12
 +	}
 +	handleKeyDown = (event) => {
 +		if (event.isComposing || event.keyCode === 229) return;
-+		if (this.ownsEvent(event)) {
-+			if (event.key !== "Escape") return;
-+			event.stopPropagation();
-+			if (!isEditableTarget(event)) {
-+				event.preventDefault();
-+				this.close();
-+			}
++		// The panel's inputs handle their own keys; its buttons get the shortcuts below.
++		if (this.ownsEvent(event) && isEditableTarget(event)) {
++			if (event.key === "Escape") event.stopPropagation();
 +			return;
 +		}
 +		if (event.defaultPrevented) return;
