@@ -330,7 +330,7 @@ index 140f94f..96fc774 100644
  	if (item.type === "diff") return item.instance.updateCodeViewLayout(item.item.fileDiff, item.top, void 0, item.item.annotations ?? []);
 diff --git a/dist/components/CodeViewSearch.js b/dist/components/CodeViewSearch.js
 new file mode 100644
-index 0000000..067ae92
+index 0000000..2cc5c66
 --- /dev/null
 +++ b/dist/components/CodeViewSearch.js
 @@ -0,0 +1,357 @@
@@ -468,7 +468,7 @@ index 0000000..067ae92
 +		return event.composedPath().some((node) => node instanceof Element && node.hasAttribute(SEARCH_HOST_ATTRIBUTE));
 +	}
 +	handleKeyDown = (event) => {
-+		if (event.isComposing) return;
++		if (event.isComposing || event.keyCode === 229) return;
 +		if (this.ownsEvent(event)) {
 +			if (event.key !== "Escape") return;
 +			event.stopPropagation();
