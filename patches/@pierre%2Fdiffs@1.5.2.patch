@@ -30,7 +30,7 @@ index cc32d28..3a46bf4 100644
     * Returns the editor while this item is being edited. Partial diffs get an
     * editor after their files load; scrolling away or collapsing keeps it.
 diff --git a/dist/components/CodeView.js b/dist/components/CodeView.js
-index 140f94f..12facc8 100644
+index 140f94f..96fc774 100644
 --- a/dist/components/CodeView.js
 +++ b/dist/components/CodeView.js
 @@ -16,6 +16,7 @@ import { prefersReducedMotion } from "../utils/prefersReducedMotion.js";
@@ -84,7 +84,7 @@ index 140f94f..12facc8 100644
  		this.root?.style.removeProperty("overflow-anchor");
  		this.container?.remove();
  		this.stickyOffset.remove();
-@@ -626,6 +635,125 @@ var CodeView = class CodeView {
+@@ -626,6 +635,137 @@ var CodeView = class CodeView {
  	getItem(itemId) {
  		return this.idToItem.get(itemId)?.item;
  	}
@@ -98,8 +98,20 @@ index 140f94f..12facc8 100644
 +	getSearchItems() {
 +		return this.items.map((item) => item.item);
 +	}
-+	getFirstVisibleItemIndex() {
-+		return this.items.length === 0 ? 0 : this.findFirstVisibleIndex(Math.max(this.getScrollTop() - this.getItemTopOffset(), 0));
++	/** Index of the first match at or below the top of the viewport, or 0 when every match is above it. */
++	getFirstVisibleSearchMatchIndex(entries) {
++		if (this.items.length === 0) return 0;
++		const visibleTop = this.getScrollTop() - this.getItemTopOffset() + this.getStickyHeaderOffset();
++		const itemIndex = this.findFirstVisibleIndex(Math.max(this.getScrollTop() - this.getItemTopOffset(), 0));
++		const item = this.items[itemIndex];
++		for (let index = 0; index < entries.length; index++) {
++			const entry = entries[index];
++			if (entry.itemIndex < itemIndex) continue;
++			if (entry.itemIndex > itemIndex) return index;
++			const position = this.getLineScrollPosition(item, entry);
++			if (position == null || item.top + position.top >= visibleTop) return index;
++		}
++		return 0;
 +	}
 +	/**
 +	* Bring a match on screen. A folded file is unfolded by the host through
@@ -210,7 +222,7 @@ index 140f94f..12facc8 100644
  	/**
  	* Returns the editor while this item is being edited. Partial diffs get an
  	* editor after their files load; scrolling away or collapsing keeps it.
-@@ -645,6 +773,7 @@ var CodeView = class CodeView {
+@@ -645,6 +785,7 @@ var CodeView = class CodeView {
  		this.render();
  		this.syncItemEditors();
  		this.syncSelection();
@@ -218,7 +230,7 @@ index 140f94f..12facc8 100644
  		return true;
  	}
  	updateItemId(oldId, newId) {
-@@ -678,6 +807,7 @@ var CodeView = class CodeView {
+@@ -678,6 +819,7 @@ var CodeView = class CodeView {
  		this.renamePendingScrollTarget(oldId, newId);
  		this.renamePendingLayoutAnchor(oldId, newId);
  		this.render();
@@ -226,7 +238,7 @@ index 140f94f..12facc8 100644
  		return true;
  	}
  	addItem(input) {
-@@ -687,6 +817,7 @@ var CodeView = class CodeView {
+@@ -687,6 +829,7 @@ var CodeView = class CodeView {
  		this.appendItemsInternal(inputs);
  		this.syncItemEditors();
  		this.syncSelection();
@@ -234,7 +246,7 @@ index 140f94f..12facc8 100644
  	}
  	removeItem(itemId) {
  		const item = this.idToItem.get(itemId);
-@@ -709,6 +840,7 @@ var CodeView = class CodeView {
+@@ -709,6 +852,7 @@ var CodeView = class CodeView {
  			for (const removedItem of removedItemsById?.values() ?? []) removedItem.instance.cleanUp();
  		}
  		this.syncSelection();
@@ -242,7 +254,7 @@ index 140f94f..12facc8 100644
  	}
  	/**
  	* Append new records to the viewer while preserving existing layout state.
-@@ -1330,6 +1462,10 @@ var CodeView = class CodeView {
+@@ -1330,6 +1474,10 @@ var CodeView = class CodeView {
  		item.item = nextItem;
  		item.version = nextItem.version;
  		item.renderedOptionsRevision = -1;
@@ -253,7 +265,7 @@ index 140f94f..12facc8 100644
  		return true;
  	}
  	getMaxScrollTopForHeight(scrollHeight) {
-@@ -1710,6 +1846,10 @@ var CodeView = class CodeView {
+@@ -1710,6 +1858,10 @@ var CodeView = class CodeView {
  		this.updateStickyPositioning();
  		this.validateStickyContainerHeight();
  		this.fixContainerFocus();
@@ -264,7 +276,7 @@ index 140f94f..12facc8 100644
  		if (fitPerfectly || this.scrollAnimation != null) this.render();
  	};
  	flushManagers(updatedItems) {
-@@ -1804,7 +1944,8 @@ var CodeView = class CodeView {
+@@ -1804,7 +1956,8 @@ var CodeView = class CodeView {
  		this.notifyScroll();
  		this.render();
  	};
@@ -274,7 +286,7 @@ index 140f94f..12facc8 100644
  		this.pendingScrollTarget = void 0;
  		this.pendingLayoutAnchor = void 0;
  		this.scrollAnimation = void 0;
-@@ -2066,7 +2207,12 @@ var CodeView = class CodeView {
+@@ -2066,7 +2219,12 @@ var CodeView = class CodeView {
  			const item = this.items[index];
  			if (item == null) throw new Error("CodeView.recomputeLayout: invalid item index");
  			item.top = runningTop;
@@ -288,7 +300,7 @@ index 140f94f..12facc8 100644
  			else item.height = item.instance.updateCodeViewLayout(item.item.file, runningTop, reset, item.item.annotations ?? []);
  			runningTop += item.height;
  			if (index < this.items.length - 1) runningTop += layout.gap;
-@@ -2086,6 +2232,27 @@ var CodeView = class CodeView {
+@@ -2086,6 +2244,27 @@ var CodeView = class CodeView {
  		return this.getLayout().gap + this.itemMetricsCache.diffHeaderHeight;
  	}
  };
@@ -318,10 +330,10 @@ index 140f94f..12facc8 100644
  	if (item.type === "diff") return item.instance.updateCodeViewLayout(item.item.fileDiff, item.top, void 0, item.item.annotations ?? []);
 diff --git a/dist/components/CodeViewSearch.js b/dist/components/CodeViewSearch.js
 new file mode 100644
-index 0000000..7d80244
+index 0000000..067ae92
 --- /dev/null
 +++ b/dist/components/CodeViewSearch.js
-@@ -0,0 +1,362 @@
+@@ -0,0 +1,357 @@
 +import { isPrimaryModifier } from "../editor/platform.js";
 +import { resolveFindAgainShortcut } from "../editor/command.js";
 +import { SearchPanelWidget } from "../editor/searchPanel.js";
@@ -422,7 +434,7 @@ index 0000000..7d80244
 +					this.#paint();
 +					return this.#current != null ? matches[this.#current] : void 0;
 +				}
-+				const next = matches[this.#current ?? this.#firstMatchFromViewport()];
++				const next = matches[this.#current ?? this.#view.getFirstVisibleSearchMatchIndex(this.#entries)];
 +				if (next != null) this.#goTo(next[0]);
 +				return next;
 +			},
@@ -511,11 +523,6 @@ index 0000000..7d80244
 +			this.#view.cancelSearchReveal();
 +			this.#paint();
 +		}
-+	}
-+	#firstMatchFromViewport() {
-+		const itemIndex = this.#view.getFirstVisibleItemIndex();
-+		const index = this.#entries.findIndex((entry) => entry.itemIndex >= itemIndex);
-+		return index === -1 ? 0 : index;
 +	}
 +	#goTo(offset) {
 +		const index = this.#entries.findIndex((entry) => entry.range[0] === offset);
